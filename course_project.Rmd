@@ -1,0 +1,85 @@
+---
+title: "Machine Learning Course Project"
+author: "Matt Frichtl"
+date: "September 16, 2015"
+output: html_document
+---
+
+```{r setup}
+set.seed(12345)
+library(dplyr)
+library(ggplot2)
+library(caret)
+```
+
+# Introduction
+
+This dataset was collected by attaching sensors to subjects and having them perform various exercises.  Some of the subjects performed these exercises incorrectly while others did not, indicated by the "classe" variable in the training dataset.  The goal of this assignment is to predict the "classe" of each subject in the testing dataset by building a machine learning algorithm from the training set.
+
+This was accomplished by processing the training set to remove unnecessary, near-zero variance, and highly correlated variables.  A predictive model was then built using a random forest algorithm with k-fold cross-validation.  This model was applied to the test set to predict what the classe of each subect in the test set is.
+
+# Data Processing
+
+First the data was read in and the first 7 variables were dropped as they were not related to the method that each exercise was performed.  Then variables that contained ~90% NAs and were near-zero variance were also removed.
+
+```{r data_processing_1, cache=TRUE}
+testing <- data.frame(read.csv(file = "./pml-testing.csv"))
+training <- data.frame(read.csv(file = "./pml-training.csv", header = TRUE)) %>% 
+  select(-matches("X"),
+         -matches("user_name"),
+         -starts_with("raw_timestamp_part_"),
+         -matches("cvtd_timestamp"),
+         -ends_with("_window"))
+
+training <- training[, colSums(is.na(training)) < 0.9 * nrow(training)]
+
+nzv <- nearZeroVar(x = training,
+                   saveMetrics = TRUE,
+                   allowParallel = TRUE)
+
+training <- training %>% 
+  select(-one_of(rownames(nzv)[nzv$nzv == TRUE]))
+```
+
+Next, the highly correlated variables were identified and one of each pair was removed from the data set.
+
+```{r correlated_vars, cache=TRUE}
+training_classe <- training %>% 
+  select(-matches("classe"))
+
+cor_mat <- findCorrelation(cor(training_classe), verbose = TRUE, names = TRUE)
+
+training <- training %>% 
+  select(-one_of(cor_mat))
+```
+
+Next the model was built.  For this assignment, a random forest algorith was selected in order to classify the test set.  Principle component analysis was used as a pre-processing technique and k-fold cross-validation was used to increase the accuracy of the model.  The cross-validation selected used 10 folds and was repeated 3 times.
+
+```{r model_fit, cache=TRUE, warning=FALSE}
+control <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+
+modelFit <- train(training$classe ~ .,
+                  preProcess = "pca",
+                  method = "rf",
+                  trControl = control,
+                  data = training,
+                  allowParallel = TRUE)
+finalModel <- modelFit$finalModel
+modelFit
+finalModel
+```
+
+So the model is approximately 98% accurate using 10-fold k-fold cross validation that was repeated 3 times.  The estimated out-of-bag (OOB) error rate was 1.69%.
+
+Next the prediction was graphed to show the classe for each observation "X"" in the test set.
+
+```{r prediction, cache=TRUE}
+pred <- predict(modelFit, newdata = testing)
+ggplot(data = testing, aes(x = X, y = pred)) +
+  geom_point(size = 4) +
+  labs(x = "X",
+       y = "Prediction",
+       title ="Classe Prediction in Test Set of HAR Data")
+```
+
+The graph above shows the predicted classe for each observation in the test set.  It was generated using the prediction model created for this assignment.
